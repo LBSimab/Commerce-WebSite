@@ -1,0 +1,32 @@
+{
+  "home": {
+    "title": "SahandCover",
+    "heroDescription": "Premium car seat covers and accessories. Protect your seats, upgrade your interior, and drive in style.",
+    "shopNow": "Shop Seat Covers",
+    "learnMore": "View Accessories",
+    "featuredCategories": "Shop by Category",
+    "currentTheme": "Current theme: {theme}",
+    "toggleTheme": "Toggle theme",
+    "categories": {
+      "seatCovers": "Seat Covers",
+      "seatCoversDesc": "Custom-fit covers for any car model",
+      "steeringWheels": "Steering Wheels",
+      "steeringWheelsDesc": "Leather grips and covers",
+      "floorMats": "Floor Mats",
+      "floorMatsDesc": "All-weather protection"
+    }
+  },
+  "products": {
+    "title": "Our Products",
+    "description": "Browse our full range of car seat covers and accessories.",
+    "found": "found"
+  },
+  "about": {
+    "title": "About SahandCover",
+    "description": "We provide high-quality car accessories with a focus on durability and style."
+  },
+  "contact": {
+    "title": "Contact Us",
+    "description": "Get in touch with our team for any questions or support."
+  }
+}
