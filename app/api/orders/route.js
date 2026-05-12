@@ -2,16 +2,15 @@
  * Orders API
  *
  * GET  — Get current user's orders
- * POST — Place a new order (checkout)
+ * POST — Place a new order (checkout) — deducts from specific Items
  */
 
 import dbConnect from "@/lib/mongodb";
 import { getCurrentUser } from "@/lib/auth";
 import Order from "@/models/Order";
 import Cart from "@/models/Cart";
-import Inventory from "@/models/Inventory";
+import Item from "@/models/Item";
 import Product from "@/models/Product";
-
 // GET — Get user's order history
 export async function GET() {
   try {
@@ -31,7 +30,7 @@ export async function GET() {
 
     return Response.json({
       success: true,
-      data: orders,
+      data: JSON.parse(JSON.stringify(orders)),
     });
   } catch (error) {
     return Response.json(
@@ -91,44 +90,66 @@ export async function POST(request) {
       );
     }
 
-    // Validate stock and deduct inventory for each item
+    // Validate stock and deduct from each Item
     const orderItems = [];
     let subtotal = 0;
 
     for (const cartItem of cart.items) {
-      const product = cartItem.product;
-
-      // Check stock
-      const inventory = await Inventory.findOne({
-        product: product._id,
+      // Find the specific Item for this variant
+      const filter = {
+        product: cartItem.product._id,
         warehouse: defaultWarehouseId,
-      });
+      };
+      if (cartItem.color) filter.color = cartItem.color;
+      if (cartItem.compatibleCar) filter.compatibleCar = cartItem.compatibleCar;
 
-      const available = inventory
-        ? inventory.quantity - (inventory.reservedQuantity || 0)
-        : 0;
+      const item = await Item.findOne(filter);
 
-      if (available < cartItem.quantity) {
+      if (!item) {
+        const productName = cartItem.product.name || "Unknown";
+        const variant =
+          [cartItem.color, cartItem.compatibleCar]
+            .filter(Boolean)
+            .join(" / ") || "default";
         return Response.json(
           {
             success: false,
-            message: `Insufficient stock for "${product.name}". Only ${available} available.`,
+            message: `Item not found: "${productName}" (${variant})`,
           },
           { status: 400 },
         );
       }
 
-      // Deduct stock
-      inventory.reservedQuantity =
-        (inventory.reservedQuantity || 0) + cartItem.quantity;
-      await inventory.save();
+      const available = item.quantity - (item.reservedQuantity || 0);
+
+      if (available < cartItem.quantity) {
+        const productName = cartItem.product.name || "Unknown";
+        const variant =
+          [cartItem.color, cartItem.compatibleCar]
+            .filter(Boolean)
+            .join(" / ") || "default";
+        return Response.json(
+          {
+            success: false,
+            message: `Insufficient stock for "${productName}" (${variant}). Only ${available} available.`,
+          },
+          { status: 400 },
+        );
+      }
+
+      // Deduct from reserved quantity
+      item.reservedQuantity = (item.reservedQuantity || 0) + cartItem.quantity;
+      await item.save();
 
       // Build order item
       orderItems.push({
-        product: product._id,
-        name: product.name,
+        item: item._id,
+        product: cartItem.product._id,
+        name: cartItem.product.name,
         price: cartItem.price,
         quantity: cartItem.quantity,
+        color: cartItem.color || null,
+        compatibleCar: cartItem.compatibleCar || null,
       });
 
       subtotal += cartItem.price * cartItem.quantity;
@@ -145,7 +166,7 @@ export async function POST(request) {
       notes: notes || "",
     });
 
-    // Clear user's cart after order is placed
+    // Clear user's cart
     await Cart.findOneAndDelete({ user: user._id });
 
     return Response.json(

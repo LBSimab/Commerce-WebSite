@@ -1,12 +1,14 @@
 /**
  * Single Order API
  *
- * GET — Get a specific order by ID
+ * GET — Get a specific order by ID (must belong to current user)
  */
 
 import dbConnect from "@/lib/mongodb";
 import { getCurrentUser } from "@/lib/auth";
 import Order from "@/models/Order";
+import Product from "@/models/Product";
+import Item from "@/models/Item";
 
 export async function GET(request, { params }) {
   try {
@@ -38,7 +40,7 @@ export async function GET(request, { params }) {
 
     return Response.json({
       success: true,
-      data: order,
+      data: JSON.parse(JSON.stringify(order)),
     });
   } catch (error) {
     return Response.json(

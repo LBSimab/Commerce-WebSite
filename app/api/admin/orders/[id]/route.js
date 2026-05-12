@@ -2,11 +2,13 @@
  * Admin Order API
  *
  * PUT — Update order status (admin only)
+ *       Handles inventory deductions/restoration based on status changes
  */
 
 import dbConnect from "@/lib/mongodb";
 import { getCurrentUser } from "@/lib/auth";
 import Order from "@/models/Order";
+import Item from "@/models/Item";
 
 export async function PUT(request, { params }) {
   try {
@@ -22,7 +24,7 @@ export async function PUT(request, { params }) {
 
     const { id } = await params;
     const body = await request.json();
-    const { status } = body;
+    const { status: newStatus } = body;
 
     const validStatuses = [
       "pending",
@@ -32,15 +34,14 @@ export async function PUT(request, { params }) {
       "delivered",
       "cancelled",
     ];
-    if (!validStatuses.includes(status)) {
+    if (!validStatuses.includes(newStatus)) {
       return Response.json(
         { success: false, message: "Invalid status" },
         { status: 400 },
       );
     }
 
-    const order = await Order.findByIdAndUpdate(id, { status }, { new: true });
-
+    const order = await Order.findById(id);
     if (!order) {
       return Response.json(
         { success: false, message: "Order not found" },
@@ -48,39 +49,40 @@ export async function PUT(request, { params }) {
       );
     }
 
-    // If cancelled, restore inventory
-    if (status === "cancelled" && order.status !== "cancelled") {
-      const defaultWarehouseId = process.env.DEFAULT_WAREHOUSE_ID;
-      if (defaultWarehouseId) {
-        const Inventory = (await import("@/models/Inventory")).default;
-        for (const item of order.items) {
-          await Inventory.findOneAndUpdate(
-            { product: item.product, warehouse: defaultWarehouseId },
-            { $inc: { reservedQuantity: -item.quantity } },
-          );
-        }
+    const oldStatus = order.status;
+
+    // If cancelling an order that wasn't already cancelled — restore reserved stock
+    if (newStatus === "cancelled" && oldStatus !== "cancelled") {
+      for (const orderItem of order.items) {
+        await Item.findByIdAndUpdate(orderItem.item, {
+          $inc: { reservedQuantity: -orderItem.quantity },
+        });
       }
     }
 
-    // If shipping from pending/confirmed, keep reserved counts
-    // Final delivered — reduce actual quantity
-    if (status === "delivered" && order.status !== "delivered") {
-      const defaultWarehouseId = process.env.DEFAULT_WAREHOUSE_ID;
-      if (defaultWarehouseId) {
-        const Inventory = (await import("@/models/Inventory")).default;
-        for (const item of order.items) {
-          await Inventory.findOneAndUpdate(
-            { product: item.product, warehouse: defaultWarehouseId },
-            {
-              $inc: {
-                quantity: -item.quantity,
-                reservedQuantity: -item.quantity,
-              },
-            },
-          );
-        }
+    // If delivering an order that wasn't already delivered — deduct actual quantity
+    if (newStatus === "delivered" && oldStatus !== "delivered") {
+      for (const orderItem of order.items) {
+        await Item.findByIdAndUpdate(orderItem.item, {
+          $inc: {
+            quantity: -orderItem.quantity,
+            reservedQuantity: -orderItem.quantity,
+          },
+        });
       }
     }
+
+    // If moving from cancelled back to another status — re-reserve
+    if (oldStatus === "cancelled" && newStatus !== "cancelled") {
+      for (const orderItem of order.items) {
+        await Item.findByIdAndUpdate(orderItem.item, {
+          $inc: { reservedQuantity: orderItem.quantity },
+        });
+      }
+    }
+
+    order.status = newStatus;
+    await order.save();
 
     return Response.json({ success: true, data: order });
   } catch (error) {

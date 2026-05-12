@@ -36,7 +36,7 @@ export default async function LocaleLayout({ children, params }) {
               <AuthProvider>
                 <Navbar locale={locale} />
                 <main className="flex-1">{children}</main>
-                <Footer />
+                <Footer />s
               </AuthProvider>
             </CartProvider>
           </ThemeProvider>

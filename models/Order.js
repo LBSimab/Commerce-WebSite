@@ -2,13 +2,20 @@
  * Order Model
  *
  * Stores completed orders after checkout.
- * Deducts inventory on creation.
+ * Each order item includes variant info (color, car) and references the Item for stock deduction.
  */
 
 import mongoose from "mongoose";
 
 const orderItemSchema = new mongoose.Schema(
   {
+    // Reference to the Item (for stock deduction)
+    item: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Item",
+      required: true,
+    },
+    // Reference to the Product (for display)
     product: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
@@ -26,6 +33,15 @@ const orderItemSchema = new mongoose.Schema(
       type: Number,
       required: true,
       min: 1,
+    },
+    // Variant fields
+    color: {
+      type: String,
+      default: null,
+    },
+    compatibleCar: {
+      type: String,
+      default: null,
     },
   },
   { _id: false },

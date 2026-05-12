@@ -65,34 +65,25 @@ export async function GET(request) {
         warehouse: defaultWarehouseId,
       }).lean();
 
-      // Create a map of productId → stock summary
+      // Create stock map — sum available quantities per product
       const stockMap = {};
-      const itemsMap = {};
-
       productIds.forEach((pid) => {
-        const pidStr = pid.toString();
-        stockMap[pidStr] = {
-          totalQuantity: 0,
-          totalAvailable: 0,
-          inStock: false,
-        };
-        itemsMap[pidStr] = [];
+        stockMap[pid.toString()] = { totalAvailable: 0, inStock: false };
       });
 
       items.forEach((item) => {
         const pidStr = item.product.toString();
-        stockMap[pidStr].totalQuantity += item.quantity;
-        stockMap[pidStr].totalAvailable += item.availableQuantity;
-        itemsMap[pidStr].push({
-          color: item.color,
-          compatibleCar: item.compatibleCar,
-          available: item.availableQuantity,
-        });
+        const available = Math.max(
+          0,
+          item.quantity - (item.reservedQuantity || 0),
+        );
+        stockMap[pidStr].totalAvailable += available;
       });
 
+      // Attach stock to each product
       products.forEach((product) => {
         const pidStr = product._id.toString();
-        const stock = stockMap[pidStr];
+        const stock = stockMap[pidStr] || { totalAvailable: 0, inStock: false };
         product.stock = {
           totalAvailable: stock.totalAvailable,
           inStock: stock.totalAvailable > 0,

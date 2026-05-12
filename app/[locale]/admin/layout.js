@@ -40,6 +40,13 @@ export default async function AdminLayout({ children, params }) {
             {isRTL ? "محصولات" : "Products"}
           </Link>
           <Link
+            href={`/${locale}/admin/items`}
+            className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
+          >
+            {isRTL ? "موجودی" : "Items"}
+          </Link>
+
+          <Link
             href={`/${locale}/admin/categories`}
             className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
           >
