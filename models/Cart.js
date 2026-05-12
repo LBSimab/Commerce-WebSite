@@ -1,11 +1,3 @@
-/**
- * Cart Model
- *
- * Stores cart items for logged-in users in the database.
- * Each user has one cart document with an array of items.
- * Guest users use localStorage instead (Zustand store).
- */
-
 import mongoose from "mongoose";
 
 const cartItemSchema = new mongoose.Schema(
@@ -25,6 +17,20 @@ const cartItemSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    // Variant fields
+    color: {
+      type: String,
+      default: null,
+    },
+    compatibleCar: {
+      type: String,
+      default: null,
+    },
+    itemId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Item",
+      default: null,
+    },
   },
   { _id: false },
 );
@@ -35,13 +41,11 @@ const cartSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true, // One cart per user
+      unique: true,
     },
     items: [cartItemSchema],
   },
-  {
-    timestamps: true,
-  },
+  { timestamps: true },
 );
 
 const Cart = mongoose.models.Cart || mongoose.model("Cart", cartSchema);

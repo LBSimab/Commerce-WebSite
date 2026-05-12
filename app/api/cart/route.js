@@ -1,7 +1,7 @@
 /**
  * Cart API
  *
- * GET    — Get the current user's cart with product details
+ * GET    — Get the current user's cart with variant details
  * POST   — Sync cart (merge/replace items for logged-in user)
  * DELETE — Clear cart
  */
@@ -10,7 +10,7 @@ import dbConnect from "@/lib/mongodb";
 import { getCurrentUser } from "@/lib/auth";
 import Cart from "@/models/Cart";
 
-// GET — Get user's cart with populated product data
+// GET — Get user's cart with populated product and variant data
 export async function GET() {
   try {
     await dbConnect();
@@ -23,49 +23,30 @@ export async function GET() {
       );
     }
 
-    // Find cart and populate product details
     let cart = await Cart.findOne({ user: user._id })
-      .populate(
-        "items.product",
-        "name nameFa price discountPrice mainImage category",
-      )
+      .populate("items.product", "name nameFa price discountPrice mainImage")
       .lean();
 
     if (!cart) {
-      // No cart yet — return empty
-      return Response.json({
-        success: true,
-        data: { items: [] },
-      });
+      return Response.json({ success: true, data: { items: [] } });
     }
 
     // Fetch stock for each item from default warehouse
     const defaultWarehouseId = process.env.DEFAULT_WAREHOUSE_ID;
     if (defaultWarehouseId && cart.items.length > 0) {
-      const Inventory = (await import("@/models/Inventory")).default;
-      const productIds = cart.items.map(
-        (item) => item.product._id || item.product,
-      );
+      const Item = (await import("@/models/Item")).default;
 
-      const inventoryRecords = await Inventory.find({
-        product: { $in: productIds },
-        warehouse: defaultWarehouseId,
-      }).lean();
-
-      const stockMap = {};
-      inventoryRecords.forEach((record) => {
-        stockMap[record.product.toString()] = Math.max(
-          0,
-          record.quantity - (record.reservedQuantity || 0),
-        );
-      });
-
-      cart.items.forEach((item) => {
-        const productId = item.product._id
-          ? item.product._id.toString()
-          : item.product.toString();
-        item.stockAvailable = stockMap[productId] || 0;
-      });
+      for (const cartItem of cart.items) {
+        const item = await Item.findById(cartItem.itemId).lean();
+        if (item) {
+          cartItem.stockAvailable = Math.max(
+            0,
+            item.quantity - (item.reservedQuantity || 0),
+          );
+        } else {
+          cartItem.stockAvailable = 0;
+        }
+      }
     }
 
     return Response.json({
@@ -80,7 +61,7 @@ export async function GET() {
   }
 }
 
-// POST — Sync cart (called on login or after cart changes)
+// POST — Sync cart
 export async function POST(request) {
   try {
     await dbConnect();
@@ -94,7 +75,7 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { items } = body; // Array of { product, quantity, price }
+    const { items } = body;
 
     if (!items || !Array.isArray(items)) {
       return Response.json(
@@ -103,17 +84,23 @@ export async function POST(request) {
       );
     }
 
-    // Upsert cart — create if doesn't exist, update if exists
+    // Transform items for cart storage
+    const cartItems = items.map((item) => ({
+      product: item.product,
+      quantity: item.quantity,
+      price: item.price,
+      color: item.color || null,
+      compatibleCar: item.compatibleCar || null,
+      itemId: item.itemId || null,
+    }));
+
     const cart = await Cart.findOneAndUpdate(
       { user: user._id },
-      { items },
+      { items: cartItems },
       { new: true, upsert: true, runValidators: true },
     );
 
-    return Response.json({
-      success: true,
-      data: cart,
-    });
+    return Response.json({ success: true, data: cart });
   } catch (error) {
     return Response.json(
       { success: false, message: error.message },
@@ -137,10 +124,7 @@ export async function DELETE() {
 
     await Cart.findOneAndDelete({ user: user._id });
 
-    return Response.json({
-      success: true,
-      message: "Cart cleared",
-    });
+    return Response.json({ success: true, message: "Cart cleared" });
   } catch (error) {
     return Response.json(
       { success: false, message: error.message },

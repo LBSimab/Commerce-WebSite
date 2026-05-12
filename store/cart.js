@@ -1,32 +1,21 @@
+/**
+ * Cart Store (Zustand)
+ *
+ * Manages shopping cart state for guest users.
+ * Persists to localStorage so cart survives page refreshes.
+ *
+ * Each cart item now includes variant info:
+ * - itemId: The Item _id from the database (for stock deduction)
+ * - color: Selected color (null if product has no colors)
+ * - compatibleCar: Selected car model (null if fits all)
+ *
+ * When user authentication is added later, this becomes the guest cart.
+ * On login, guest cart will merge with the user's database cart.
+ */
+
 import { create } from "zustand";
 
-// Helper: sync current cart to database if user is logged in
-const syncToDB = async (items) => {
-  try {
-    const { useAuthStore } = await import("@/store/auth");
-    const user = useAuthStore.getState().user;
-
-    // Only sync if user is logged in
-    if (!user) return;
-
-    await fetch("/api/cart", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        items: items.map((item) => ({
-          product: item.productId,
-          quantity: item.quantity,
-          price: item.price,
-        })),
-      }),
-    });
-  } catch {
-    // Silent fail — localStorage still works
-  }
-};
-
-// Load guest cart from local
-// Storage
+// Load cart from localStorage when initializing
 const loadCartFromStorage = () => {
   if (typeof window === "undefined") return [];
   try {
@@ -37,19 +26,48 @@ const loadCartFromStorage = () => {
   }
 };
 
-// Save guest cart to localStorage
+// Save cart to localStorage after every change
 const saveCartToStorage = (items) => {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem("sahandcover-cart", JSON.stringify(items));
-  } catch {}
+  } catch {
+    // localStorage might be full or unavailable
+  }
+};
+
+// Helper: sync current cart to database if user is logged in
+const syncToDB = async (items) => {
+  try {
+    const { useAuthStore } = await import("@/store/auth");
+    const user = useAuthStore.getState().user;
+    if (!user) return;
+
+    await fetch("/api/cart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: items.map((item) => ({
+          product: item.productId,
+          quantity: item.quantity,
+          price: item.price,
+          color: item.color || null,
+          compatibleCar: item.compatibleCar || null,
+          itemId: item.itemId || null,
+        })),
+      }),
+    });
+  } catch {
+    // Silent fail — localStorage still works
+  }
 };
 
 export const useCartStore = create((set, get) => ({
+  // Array of cart items
   items: [],
-  isSynced: false, // Track if cart has been synced with DB
+  isSynced: false,
 
-  // Load cart from localStorage
+  // Load cart from localStorage — call once when app mounts
   loadCart: () => {
     const items = loadCartFromStorage();
     set({ items, isSynced: false });
@@ -60,22 +78,8 @@ export const useCartStore = create((set, get) => ({
     try {
       const { items } = get();
       if (items.length === 0) return;
-
-      const res = await fetch("/api/cart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: items.map((item) => ({
-            product: item.productId,
-            quantity: item.quantity,
-            price: item.price,
-          })),
-        }),
-      });
-
-      if (res.ok) {
-        set({ isSynced: true });
-      }
+      await syncToDB(items);
+      set({ isSynced: true });
     } catch {}
   },
 
@@ -87,16 +91,18 @@ export const useCartStore = create((set, get) => ({
 
       const data = await res.json();
       const dbItems = data.data.items || [];
-
       if (dbItems.length === 0) return;
 
       // Convert DB format to cart store format
       const convertedItems = dbItems.map((item) => ({
-        productId: item.product._id || item.product,
+        productId: (item.product._id || item.product).toString(),
+        itemId: item.itemId || null,
         name: item.product.name || "",
         nameFa: item.product.nameFa || "",
         price: item.price,
         mainImage: item.product.mainImage || "",
+        color: item.color || null,
+        compatibleCar: item.compatibleCar || null,
         quantity: item.quantity,
         maxQuantity: item.stockAvailable || 99,
       }));
@@ -111,13 +117,11 @@ export const useCartStore = create((set, get) => ({
     const { items: guestItems } = get();
 
     if (guestItems.length === 0) {
-      // No guest items — just load from DB
       await get().loadFromDatabase();
       return;
     }
 
     try {
-      // Load DB cart
       const res = await fetch("/api/cart");
       let dbItems = [];
 
@@ -125,32 +129,35 @@ export const useCartStore = create((set, get) => ({
         const data = await res.json();
         dbItems = (data.data.items || []).map((item) => ({
           productId: (item.product._id || item.product).toString(),
+          itemId: item.itemId || null,
           name: item.product.name || "",
           nameFa: item.product.nameFa || "",
           price: item.price,
           mainImage: item.product.mainImage || "",
-
+          color: item.color || null,
+          compatibleCar: item.compatibleCar || null,
           quantity: item.quantity,
           maxQuantity: item.stockAvailable || 99,
         }));
       }
 
-      // Merge: combine quantities for same product, keep unique items
+      // Merge: items with same productId + color + car get quantities combined
       const merged = [...dbItems];
 
       guestItems.forEach((guestItem) => {
         const existingIndex = merged.findIndex(
-          (dbItem) => dbItem.productId === guestItem.productId,
+          (dbItem) =>
+            dbItem.productId === guestItem.productId &&
+            dbItem.color === guestItem.color &&
+            dbItem.compatibleCar === guestItem.compatibleCar,
         );
         if (existingIndex > -1) {
-          // Product exists in both — add quantities
           merged[existingIndex].quantity += guestItem.quantity;
           merged[existingIndex].quantity = Math.min(
             merged[existingIndex].quantity,
             merged[existingIndex].maxQuantity || 99,
           );
         } else {
-          // New product — add to merged cart
           merged.push(guestItem);
         }
       });
@@ -158,50 +165,49 @@ export const useCartStore = create((set, get) => ({
       set({ items: merged, isSynced: true });
       saveCartToStorage(merged);
 
-      // Sync merged cart to DB
-      await fetch("/api/cart", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: merged.map((item) => ({
-            product: item.productId,
-            quantity: item.quantity,
-            price: item.price,
-          })),
-        }),
-      });
+      await syncToDB(merged);
     } catch {}
   },
 
-  // Add item
+  // Add item to cart
+  // product should include: _id, name, nameFa, price, mainImage, color, compatibleCar, stock.available, itemId
   addItem: (product, quantity = 1) => {
     const { items } = get();
+    const color = product.color || null;
+    const car = product.compatibleCar || null;
+
+    // Find existing item with same product + color + car
     const existingIndex = items.findIndex(
-      (item) => item.productId === product._id,
+      (item) =>
+        item.productId === product._id &&
+        item.color === color &&
+        item.compatibleCar === car,
     );
 
     let updated;
-    if (existingIndex > -1) {
-      updated = [...items];
-      const maxQty = product.stock?.available || 99;
-      updated[existingIndex].quantity = Math.min(
-        updated[existingIndex].quantity + quantity,
-        maxQty,
-      );
-    } else {
-      updated = [
-        ...items,
-        {
-          productId: product._id,
-          name: product.name,
-          nameFa: product.nameFa || product.name,
-          price: product.discountPrice || product.price,
-          mainImage: product.mainImage || "",
 
-          quantity,
-          maxQuantity: product.stock?.available || 99,
-        },
-      ];
+    if (existingIndex > -1) {
+      // Already in cart — increase quantity
+      updated = [...items];
+      const currentQty = updated[existingIndex].quantity;
+      const maxQty =
+        product.stock?.available || updated[existingIndex].maxQuantity || 99;
+      updated[existingIndex].quantity = Math.min(currentQty + quantity, maxQty);
+    } else {
+      // New item — add to cart
+      const newItem = {
+        productId: product._id,
+        itemId: product.itemId || null,
+        name: product.name,
+        nameFa: product.nameFa || product.name,
+        price: product.price,
+        mainImage: product.mainImage || "",
+        color: color,
+        compatibleCar: car,
+        quantity,
+        maxQuantity: product.stock?.available || 99,
+      };
+      updated = [...items, newItem];
     }
 
     set({ items: updated });
@@ -209,18 +215,28 @@ export const useCartStore = create((set, get) => ({
     syncToDB(updated);
   },
 
-  // Remove item
-  removeItem: (productId) => {
-    const updated = get().items.filter((item) => item.productId !== productId);
+  // Remove an item from cart
+  removeItem: (productId, color = null, compatibleCar = null) => {
+    const updated = get().items.filter(
+      (item) =>
+        !(
+          item.productId === productId &&
+          item.color === color &&
+          item.compatibleCar === compatibleCar
+        ),
+    );
     set({ items: updated });
     saveCartToStorage(updated);
     syncToDB(updated);
   },
 
-  // Update quantity
-  updateQuantity: (productId, quantity) => {
-    const updated = get().items.map((item) =>
-      item.productId === productId
+  // Update quantity of an item
+  updateQuantity: (productId, quantity, color = null, compatibleCar = null) => {
+    const { items } = get();
+    const updated = items.map((item) =>
+      item.productId === productId &&
+      item.color === color &&
+      item.compatibleCar === compatibleCar
         ? {
             ...item,
             quantity: Math.min(Math.max(1, quantity), item.maxQuantity),
@@ -232,29 +248,29 @@ export const useCartStore = create((set, get) => ({
     syncToDB(updated);
   },
 
-  // Clear cart
+  // Clear entire cart
   clearCart: () => {
     set({ items: [] });
     saveCartToStorage([]);
+
     // Also clear from database if logged in
     const clearFromDB = async () => {
       try {
         const { useAuthStore } = await import("@/store/auth");
         const user = useAuthStore.getState().user;
         if (!user) return;
-
         await fetch("/api/cart", { method: "DELETE" });
       } catch {}
     };
     clearFromDB();
   },
 
-  // Get total items
+  // Get total number of items (sum of all quantities)
   getTotalItems: () => {
     return get().items.reduce((sum, item) => sum + item.quantity, 0);
   },
 
-  // Get total price
+  // Get total price of all items
   getTotalPrice: () => {
     return get().items.reduce(
       (sum, item) => sum + item.price * item.quantity,

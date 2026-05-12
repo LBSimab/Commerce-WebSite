@@ -9,14 +9,22 @@ export default function AddToCartButton({ product, locale, variant = "card" }) {
   const updateQuantity = useCartStore((state) => state.updateQuantity);
   const items = useCartStore((state) => state.items);
 
-  // Check if this product is already in the cart
-  const cartItem = items.find((item) => item.productId === product._id);
+  const color = product.color || null;
+  const car = product.compatibleCar || null;
+
+  // Find this exact variant in cart
+  const cartItem = items.find(
+    (item) =>
+      item.productId === product._id &&
+      item.color === color &&
+      item.compatibleCar === car,
+  );
   const isInCart = !!cartItem;
 
-  // Stock info — fallback to cartItem.maxQuantity if product has no stock field
+  // Stock info
   const inStock = product.stock?.available > 0;
 
-  // Out of stock and not already in cart
+  // Out of stock
   if (!inStock && !isInCart) {
     return (
       <Button
@@ -33,32 +41,28 @@ export default function AddToCartButton({ product, locale, variant = "card" }) {
   // Already in cart — show quantity controls
   if (isInCart) {
     return (
-      <div
-        className={`flex items-center gap-2 ${variant === "detail" ? "w-full" : "w-full"}`}
-      >
-        {/* Minus button */}
+      <div className="flex items-center gap-2 w-full">
         <button
           onClick={() => {
             if (cartItem.quantity <= 1) {
-              removeItem(product._id);
+              removeItem(product._id, color, car);
             } else {
-              updateQuantity(product._id, cartItem.quantity - 1);
+              updateQuantity(product._id, cartItem.quantity - 1, color, car);
             }
           }}
           className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
           −
         </button>
-
-        {/* Quantity display */}
         <span className="flex-1 text-center text-sm font-medium text-gray-900 dark:text-gray-50 min-w-[40px]">
           {cartItem.quantity}
         </span>
-
-        {/* Plus button */}
         <button
-          onClick={() => addItem(product, 1)}
-          className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+          onClick={() =>
+            updateQuantity(product._id, cartItem.quantity + 1, color, car)
+          }
+          disabled={cartItem.quantity >= (product.stock?.available || 99)}
+          className="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50"
         >
           +
         </button>
