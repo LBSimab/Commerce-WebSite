@@ -1,201 +1,205 @@
 "use client";
 
-/**
- * ProductCard Component
- *
- * Premium product card with hover effects, gradient overlays,
- * rating stars, price with discount badge, and quick add to cart.
- * Inspired by modern e-commerce card designs.
- */
-
+import { useState } from "react";
 import Link from "next/link";
-import { useCartStore } from "@/store/cart";
 
 export default function ProductCard({ product, locale }) {
   const isRTL = locale === "fa";
-  const addItem = useCartStore((state) => state.addItem);
-  const items = useCartStore((state) => state.items);
 
   const productName = isRTL && product.nameFa ? product.nameFa : product.name;
+  const productDesc =
+    isRTL && product.descriptionFa
+      ? product.descriptionFa
+      : product.description;
   const categoryName =
     isRTL && product.category?.nameFa
       ? product.category.nameFa
       : product.category?.name;
   const formattedPrice = product.price?.toLocaleString();
   const formattedDiscount = product.discountPrice?.toLocaleString();
-  const inStock = product.stock?.inStock !== false;
-  const productLink = `/${locale}/products/${product._id}`;
   const hasDiscount = !!product.discountPrice;
+  const productLink = `/${locale}/products/${product._id}`;
 
-  // Calculate discount percentage
-  const discountPercent = hasDiscount
-    ? Math.round(
-        ((product.price - product.discountPrice) / product.price) * 100,
-      )
-    : 0;
+  const [selectedColor, setSelectedColor] = useState(null);
+  const [selectedCar, setSelectedCar] = useState(null);
 
-  // Check if in cart
-  const inCart = items.some((item) => item.productId === product._id);
+  const hasColors = product.colors?.length > 0;
+  const hasCars = product.compatibleCars?.length > 0;
+
+  const getColorHex = (color) => {
+    const map = {
+      black: "#1a1a1a",
+      white: "#f5f5f5",
+      red: "#ef4444",
+      blue: "#3b82f6",
+      gray: "#9ca3af",
+      grey: "#9ca3af",
+      beige: "#d4b896",
+      brown: "#8b5e3c",
+      silver: "#c0c0c0",
+      green: "#22c55e",
+    };
+    return map[color?.toLowerCase()] || "#6366f1";
+  };
 
   return (
-    <div className="group relative bg-white dark:bg-gray-900 rounded-3xl overflow-hidden border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-2xl transition-all duration-500 hover:-translate-y-2">
-      {/* Image Container */}
-      <Link
-        href={productLink}
-        className="block relative overflow-hidden aspect-[4/5] bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700"
-      >
-        {product.mainImage ? (
-          <img
-            src={product.mainImage}
-            alt={productName}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <span className="text-7xl opacity-40 group-hover:scale-110 transition-transform duration-700">
-              {product.category?.image ? (
-                <img
-                  src={product.category.image}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                "📦"
-              )}
-            </span>
-          </div>
-        )}
+    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 overflow-hidden hover:shadow-xl transition-shadow duration-300">
+      {/* Image */}
+      <Link href={productLink} className="block p-3 pb-0">
+        <div className="overflow-hidden rounded-xl border-2 border-gray-100 dark:border-gray-700 aspect-[4/3] bg-gray-50 dark:bg-gray-800 relative">
+          {product.mainImage ? (
+            <img
+              src={product.mainImage}
+              alt={productName}
+              className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-4xl opacity-40">
+              📦
+            </div>
+          )}
 
-        {/* Discount Badge */}
-        {hasDiscount && (
-          <div className="absolute top-4 left-4 z-10">
-            <span className="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse">
-              -{discountPercent}%
-            </span>
-          </div>
-        )}
-
-        {/* Quick Actions Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 flex items-end justify-center pb-6">
-          <span className="px-6 py-3 bg-white text-gray-900 rounded-full text-sm font-semibold shadow-xl transform translate-y-4 group-hover:translate-y-0 transition-transform duration-500">
-            {isRTL ? "مشاهده محصول" : "View Product"}
-          </span>
+          {hasDiscount && (
+            <div className="absolute top-2 left-2">
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-500 text-white">
+                -
+                {Math.round(
+                  ((product.price - product.discountPrice) / product.price) *
+                    100,
+                )}
+                %
+              </span>
+            </div>
+          )}
         </div>
-
-        {/* Out of Stock Overlay */}
-        {!inStock && (
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px] flex items-center justify-center">
-            <span className="px-6 py-3 bg-white dark:bg-gray-900 rounded-full text-sm font-bold text-gray-700 dark:text-gray-300 shadow-2xl">
-              {isRTL ? "ناموجود" : "Sold Out"}
-            </span>
-          </div>
-        )}
       </Link>
 
-      {/* Content */}
-      <div className="p-5">
+      {/* Info */}
+      <div className="p-4 space-y-1.5">
         {/* Category */}
         {categoryName && (
-          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+          <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium uppercase tracking-wider">
             {categoryName}
-          </span>
+          </p>
         )}
 
-        {/* Product Name */}
+        {/* Name */}
         <Link href={productLink}>
-          <h3 className="mt-1.5 font-bold text-gray-900 dark:text-gray-50 line-clamp-2 leading-snug hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-50 line-clamp-1 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-sm">
             {productName}
           </h3>
         </Link>
 
+        {/* Description */}
+        {productDesc && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">
+            {productDesc}
+          </p>
+        )}
+
         {/* Rating */}
         {product.rating?.count > 0 && (
-          <div className="flex items-center gap-1.5 mt-2">
-            <div className="flex text-amber-400 text-sm">
+          <div className="flex items-center gap-1">
+            <div className="flex text-amber-400 text-xs">
               {[1, 2, 3, 4, 5].map((s) => (
-                <span
-                  key={s}
-                  className={
-                    s <= Math.round(product.rating.average)
-                      ? "text-amber-400"
-                      : "text-gray-200 dark:text-gray-700"
-                  }
-                >
-                  ★
+                <span key={s}>
+                  {s <= Math.round(product.rating.average) ? "★" : "☆"}
                 </span>
               ))}
             </div>
-            <span className="text-xs text-gray-400 font-medium">
+            <span className="text-[10px] text-gray-400">
               ({product.rating.count})
             </span>
           </div>
         )}
 
-        {/* Price + Add to Cart */}
-        <div className="flex items-end justify-between mt-4">
-          <div>
-            {hasDiscount ? (
-              <div className="flex flex-col">
-                <span className="text-2xl font-extrabold text-gray-900 dark:text-gray-50">
-                  {formattedDiscount}
-                  <span className="text-sm font-normal text-gray-400 ml-1">
-                    T
-                  </span>
-                </span>
-                <span className="text-sm text-gray-400 line-through -mt-1">
-                  {formattedPrice} T
-                </span>
-              </div>
-            ) : (
-              <span className="text-2xl font-extrabold text-gray-900 dark:text-gray-50">
-                {formattedPrice}
-                <span className="text-sm font-normal text-gray-400 ml-1">
-                  T
-                </span>
+        {/* Price */}
+        <div>
+          {hasDiscount ? (
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-lg font-bold text-red-600 dark:text-red-400">
+                {formattedDiscount}
               </span>
+              <span className="text-xs text-gray-400 line-through">
+                {formattedPrice}
+              </span>
+              <span className="text-[10px] text-gray-400">T</span>
+            </div>
+          ) : (
+            <span className="text-lg font-bold text-gray-900 dark:text-gray-50">
+              {formattedPrice}
+              <span className="text-[10px] font-normal text-gray-400 ml-0.5">
+                T
+              </span>
+            </span>
+          )}
+        </div>
+
+        {/* Color Circles */}
+        {hasColors && (
+          <div>
+            <div className="flex flex-wrap gap-1.5">
+              {product.colors.map((color) => {
+                const isSelected = selectedColor === color;
+                return (
+                  <button
+                    key={color}
+                    onClick={() => {
+                      setSelectedColor(isSelected ? null : color);
+                      setSelectedCar(null);
+                    }}
+                    title={color}
+                    className={`w-7 h-7 rounded-full border-2 transition-all ${
+                      isSelected
+                        ? "border-indigo-600 dark:border-indigo-400 scale-110 ring-2 ring-indigo-200 dark:ring-indigo-800"
+                        : "border-gray-300 dark:border-gray-600 hover:scale-105"
+                    }`}
+                    style={{ backgroundColor: getColorHex(color) }}
+                  />
+                );
+              })}
+            </div>
+            {selectedColor && (
+              <p className="text-[10px] text-gray-500 mt-0.5">
+                {selectedColor}
+              </p>
             )}
           </div>
+        )}
 
-          {/* Quick Add Button — for products without variants */}
-          {inStock &&
-            !product.colors?.length &&
-            !product.compatibleCars?.length && (
-              <button
-                onClick={() =>
-                  addItem({ ...product, stock: { available: 99 } }, 1)
-                }
-                className={`w-11 h-11 flex items-center justify-center rounded-2xl transition-all duration-300 shadow-lg ${
-                  inCart
-                    ? "bg-green-500 text-white shadow-green-500/30"
-                    : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/30 hover:scale-110"
-                }`}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
+        {/* Car Buttons — show when color selected (if has both) */}
+        {hasCars && (
+          <div className="flex flex-wrap gap-1">
+            {product.compatibleCars.map((car) => {
+              const isSelected = selectedCar === car;
+              const disabled = hasColors && !selectedColor;
+              return (
+                <button
+                  key={car}
+                  onClick={() => setSelectedCar(isSelected ? null : car)}
+                  disabled={disabled}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                    isSelected
+                      ? "bg-indigo-600 text-white"
+                      : disabled
+                        ? "bg-gray-100 dark:bg-gray-800 text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                        : "bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700"
+                  }`}
                 >
-                  {inCart ? (
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  ) : (
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 4v16m8-8H4"
-                    />
-                  )}
-                </svg>
-              </button>
-            )}
-        </div>
+                  {car}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* View Product link */}
+        <Link
+          href={productLink}
+          className="block text-center text-[11px] text-indigo-600 dark:text-indigo-400 font-medium hover:text-indigo-700 pt-1"
+        >
+          {isRTL ? "مشاهده محصول" : "View Product"} →
+        </Link>
       </div>
     </div>
   );
