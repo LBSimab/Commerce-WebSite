@@ -100,6 +100,16 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+
+    discountCode: { type: String, default: null },
+    discountAmount: { type: Number, default: 0 },
+    paymentMethod: { type: String, default: null },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "paid", "failed", "refunded"],
+      default: "pending",
+    },
+    paymentReference: { type: String, default: null },
   },
   {
     timestamps: true,

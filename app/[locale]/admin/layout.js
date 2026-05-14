@@ -90,6 +90,12 @@ export default async function AdminLayout({ children, params }) {
             {isRTL ? "موقعیت‌ها" : "Locations"}
           </Link>
           <Link
+            href={`/${locale}/admin/payment-gateways`}
+            className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
+          >
+            {isRTL ? "درگاه‌ها" : "Gateways"}
+          </Link>
+          <Link
             href={`/${locale}/admin/tickets`}
             className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
           >

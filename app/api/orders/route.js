@@ -2,7 +2,7 @@
  * Orders API
  *
  * GET  — Get current user's orders
- * POST — Place a new order (checkout) — deducts from specific Items
+ * POST — Place a new order with optional discount code and payment method
  */
 
 import dbConnect from "@/lib/mongodb";
@@ -10,7 +10,7 @@ import { getCurrentUser } from "@/lib/auth";
 import Order from "@/models/Order";
 import Cart from "@/models/Cart";
 import Item from "@/models/Item";
-import Product from "@/models/Product";
+
 // GET — Get user's order history
 export async function GET() {
   try {
@@ -40,7 +40,7 @@ export async function GET() {
   }
 }
 
-// POST — Place an order (checkout)
+// POST — Place an order with optional discount code and payment method
 export async function POST(request) {
   try {
     await dbConnect();
@@ -54,7 +54,7 @@ export async function POST(request) {
     }
 
     const body = await request.json();
-    const { shippingAddress, notes } = body;
+    const { shippingAddress, notes, discountCode, paymentMethod } = body;
 
     // Validate shipping address
     if (
@@ -155,18 +155,73 @@ export async function POST(request) {
       subtotal += cartItem.price * cartItem.quantity;
     }
 
-    // Create order
+    let total = subtotal;
+    let discountAmount = 0;
+    let appliedCode = null;
+
+    // Validate discount code if provided
+    if (discountCode) {
+      const DiscountCode = (await import("@/models/DiscountCode")).default;
+      const discount = await DiscountCode.findOne({
+        code: discountCode.toUpperCase().trim(),
+        isActive: true,
+        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
+      });
+
+      if (!discount) {
+        return Response.json(
+          { success: false, message: "Invalid or expired discount code" },
+          { status: 400 },
+        );
+      }
+
+      if (discount.maxUses && discount.usedCount >= discount.maxUses) {
+        return Response.json(
+          { success: false, message: "Discount code has reached maximum uses" },
+          { status: 400 },
+        );
+      }
+
+      if (subtotal < discount.minOrderAmount) {
+        return Response.json(
+          {
+            success: false,
+            message: `Minimum order amount for this code is ${discount.minOrderAmount.toLocaleString()} T`,
+          },
+          { status: 400 },
+        );
+      }
+
+      // Calculate discount
+      if (discount.type === "percentage") {
+        discountAmount = Math.round((subtotal * discount.value) / 100);
+      } else {
+        discountAmount = Math.min(discount.value, subtotal);
+      }
+
+      total = subtotal - discountAmount;
+      appliedCode = discount.code;
+
+      // Increment usage count
+      discount.usedCount = (discount.usedCount || 0) + 1;
+      await discount.save();
+    }
+
+    // Create the order
     const order = await Order.create({
       user: user._id,
       items: orderItems,
       shippingAddress,
       subtotal,
-      shippingCost: 0,
-      total: subtotal,
+      discountCode: appliedCode,
+      discountAmount,
+      total,
+      paymentMethod: paymentMethod || null,
+      paymentStatus: "pending",
       notes: notes || "",
     });
 
-    // Clear user's cart
+    // Clear user's cart after successful order
     await Cart.findOneAndDelete({ user: user._id });
 
     return Response.json(

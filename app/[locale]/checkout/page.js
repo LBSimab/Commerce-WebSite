@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { useCartStore } from "@/store/cart";
@@ -19,12 +19,13 @@ export default function CheckoutPage({ params }) {
   const getTotalPrice = useCartStore((state) => state.getTotalPrice);
   const clearCart = useCartStore((state) => state.clearCart);
 
+  const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [orderId, setOrderId] = useState("");
 
-  // Shipping form state
+  // Shipping form
   const [form, setForm] = useState({
     fullName: user?.name || "",
     phone: "",
@@ -34,51 +35,34 @@ export default function CheckoutPage({ params }) {
     postalCode: "",
   });
 
+  // Discount
+  const [discountCode, setDiscountCode] = useState("");
+  const [discountData, setDiscountData] = useState(null);
+  const [discountError, setDiscountError] = useState("");
+  const [applyingDiscount, setApplyingDiscount] = useState(false);
+
+  // Payment
+  const [paymentMethod, setPaymentMethod] = useState("");
+  const [gateways, setGateways] = useState([]);
+
+  // Fetch gateways once on render
+  const [gatewaysFetched, setGatewaysFetched] = useState(false);
+  if (!gatewaysFetched) {
+    setGatewaysFetched(true);
+    fetch("/api/payment-gateways")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) setGateways(d.data);
+      })
+      .catch(() => {});
+  }
+
   // Redirect if not logged in
-  useEffect(() => {
-    if (!isLoading && !user) {
-      router.push(`/${locale}/login`);
-    }
-  }, [isLoading, user, router, locale]);
+  if (!isLoading && !user) {
+    router.push(`/${locale}/login`);
+    return null;
+  }
 
-  // Pre-fill name from user profile
-
-  const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError("");
-    setIsSubmitting(true);
-
-    try {
-      const res = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          shippingAddress: form,
-          notes: "",
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message);
-      }
-
-      setOrderId(data.data._id);
-      setSuccess(true);
-      clearCart();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Loading
   if (isLoading) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-12">
@@ -90,10 +74,8 @@ export default function CheckoutPage({ params }) {
     );
   }
 
-  // Not logged in
   if (!user) return null;
 
-  // Empty cart
   if (items.length === 0 && !success) {
     return (
       <div className="max-w-4xl mx-auto px-4 py-12 text-center">
@@ -101,11 +83,6 @@ export default function CheckoutPage({ params }) {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-50 mb-4">
           {isRTL ? "سبد خرید خالی است" : "Cart is empty"}
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 mb-6">
-          {isRTL
-            ? "برای ثبت سفارش ابتدا محصولاتی را به سبد خرید اضافه کنید."
-            : "Add products to your cart before checking out."}
-        </p>
         <Link href={`/${locale}/products`}>
           <Button variant="primary" size="lg">
             {isRTL ? "مشاهده محصولات" : "Browse Products"}
@@ -115,7 +92,6 @@ export default function CheckoutPage({ params }) {
     );
   }
 
-  // Success state
   if (success) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-12 text-center">
@@ -144,7 +120,63 @@ export default function CheckoutPage({ params }) {
     );
   }
 
-  const totalPrice = getTotalPrice();
+  const subtotal = getTotalPrice();
+  const discountAmount = discountData?.discountAmount || 0;
+  const total = subtotal - discountAmount;
+
+  const applyDiscount = async () => {
+    if (!discountCode.trim()) return;
+    setApplyingDiscount(true);
+    setDiscountError("");
+    setDiscountData(null);
+    try {
+      const res = await fetch("/api/discount/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: discountCode, orderAmount: subtotal }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setDiscountData(data.data);
+    } catch (err) {
+      setDiscountError(err.message);
+    } finally {
+      setApplyingDiscount(false);
+    }
+  };
+
+  const removeDiscount = () => {
+    setDiscountCode("");
+    setDiscountData(null);
+    setDiscountError("");
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shippingAddress: form,
+          notes: "",
+          discountCode: discountData?.code || null,
+          paymentMethod,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message);
+      setOrderId(data.data._id);
+      setSuccess(true);
+      clearCart();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-12">
@@ -152,163 +184,401 @@ export default function CheckoutPage({ params }) {
         {isRTL ? "تسویه حساب" : "Checkout"}
       </h1>
 
+      {/* Steps indicator */}
+      <div className="flex items-center gap-2 mb-8">
+        {[1, 2, 3].map((s) => (
+          <div key={s} className="flex items-center gap-2">
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                step >= s
+                  ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                  : "bg-gray-200 dark:bg-gray-700 text-gray-500"
+              }`}
+            >
+              {s}
+            </div>
+            <span className="text-xs text-gray-500 hidden sm:inline">
+              {s === 1
+                ? isRTL
+                  ? "آدرس"
+                  : "Address"
+                : s === 2
+                  ? isRTL
+                    ? "پرداخت"
+                    : "Payment"
+                  : isRTL
+                    ? "تایید"
+                    : "Confirm"}
+            </span>
+            {s < 3 && (
+              <div
+                className={`w-8 h-0.5 transition-all ${step > s ? "bg-indigo-600" : "bg-gray-200 dark:bg-gray-700"}`}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+
       {error && (
-        <div className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+        <div className="mb-6 p-4 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
           {error}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-        {/* Shipping form */}
+        {/* Main Content */}
         <div className="lg:col-span-3">
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-6">
-              {isRTL ? "آدرس ارسال" : "Shipping Address"}
-            </h2>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Step 1: Shipping Address */}
+          {step === 1 && (
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-4">
+                {isRTL ? "آدرس ارسال" : "Shipping Address"}
+              </h2>
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      {isRTL ? "نام کامل" : "Full Name"}
+                    </label>
+                    <input
+                      type="text"
+                      value={form.fullName}
+                      onChange={(e) =>
+                        setForm({ ...form, fullName: e.target.value })
+                      }
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 text-sm focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      {isRTL ? "تلفن" : "Phone"}
+                    </label>
+                    <input
+                      type="text"
+                      value={form.phone}
+                      onChange={(e) =>
+                        setForm({ ...form, phone: e.target.value })
+                      }
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 text-sm focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      {isRTL ? "استان" : "Province"}
+                    </label>
+                    <input
+                      type="text"
+                      value={form.province}
+                      onChange={(e) =>
+                        setForm({ ...form, province: e.target.value })
+                      }
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 text-sm focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      {isRTL ? "شهر" : "City"}
+                    </label>
+                    <input
+                      type="text"
+                      value={form.city}
+                      onChange={(e) =>
+                        setForm({ ...form, city: e.target.value })
+                      }
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 text-sm focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {isRTL ? "نام کامل" : "Full Name"}
+                    {isRTL ? "آدرس" : "Address"}
                   </label>
-                  <input
-                    type="text"
-                    name="fullName"
-                    value={form.fullName}
-                    onChange={handleChange}
+                  <textarea
+                    value={form.address}
+                    onChange={(e) =>
+                      setForm({ ...form, address: e.target.value })
+                    }
                     required
-                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    rows={3}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 text-sm focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {isRTL ? "تلفن" : "Phone"}
+                    {isRTL ? "کد پستی (اختیاری)" : "Postal Code (optional)"}
                   </label>
                   <input
                     type="text"
-                    name="phone"
-                    value={form.phone}
-                    onChange={handleChange}
-                    required
-                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    value={form.postalCode}
+                    onChange={(e) =>
+                      setForm({ ...form, postalCode: e.target.value })
+                    }
+                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 text-sm focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {isRTL ? "استان" : "Province"}
-                  </label>
-                  <input
-                    type="text"
-                    name="province"
-                    value={form.province}
-                    onChange={handleChange}
-                    required
-                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {isRTL ? "شهر" : "City"}
-                  </label>
-                  <input
-                    type="text"
-                    name="city"
-                    value={form.city}
-                    onChange={handleChange}
-                    required
-                    className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {isRTL ? "آدرس" : "Address"}
-                </label>
-                <textarea
-                  name="address"
-                  value={form.address}
-                  onChange={handleChange}
-                  required
-                  rows={3}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {isRTL ? "کد پستی (اختیاری)" : "Postal Code (optional)"}
-                </label>
-                <input
-                  type="text"
-                  name="postalCode"
-                  value={form.postalCode}
-                  onChange={handleChange}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-              </div>
-
               <Button
-                type="submit"
+                onClick={() => setStep(2)}
                 variant="primary"
                 size="lg"
-                className="w-full"
-                disabled={isSubmitting}
+                className="w-full mt-6"
               >
-                {isSubmitting
-                  ? isRTL
-                    ? "در حال ثبت سفارش..."
-                    : "Placing Order..."
-                  : `${isRTL ? "ثبت سفارش" : "Place Order"} — ${totalPrice.toLocaleString()} T`}
+                {isRTL ? "ادامه" : "Continue"}
               </Button>
-            </form>
-          </div>
+            </div>
+          )}
+
+          {/* Step 2: Payment Method + Discount */}
+          {step === 2 && (
+            <div className="space-y-6">
+              {/* Discount Code */}
+              <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-4">
+                  {isRTL ? "کد تخفیف" : "Discount Code"}
+                </h2>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={discountCode}
+                    onChange={(e) => setDiscountCode(e.target.value)}
+                    placeholder={
+                      isRTL
+                        ? "کد تخفیف خود را وارد کنید..."
+                        : "Enter discount code..."
+                    }
+                    className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm font-mono uppercase focus:ring-2 focus:ring-indigo-500"
+                  />
+                  {discountData ? (
+                    <button
+                      onClick={removeDiscount}
+                      className="px-4 py-3 rounded-xl bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm font-medium hover:bg-red-200 dark:hover:bg-red-900/30 transition-colors"
+                    >
+                      ✕
+                    </button>
+                  ) : (
+                    <button
+                      onClick={applyDiscount}
+                      disabled={applyingDiscount || !discountCode.trim()}
+                      className="px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                    >
+                      {applyingDiscount ? "..." : isRTL ? "اعمال" : "Apply"}
+                    </button>
+                  )}
+                </div>
+                {discountError && (
+                  <p className="text-xs text-red-500 mt-2">{discountError}</p>
+                )}
+                {discountData && (
+                  <p className="text-xs text-green-600 dark:text-green-400 mt-2 font-medium">
+                    {isRTL ? "تخفیف اعمال شد:" : "Discount applied:"}{" "}
+                    {discountData.discountAmount.toLocaleString()} T (
+                    {discountData.type === "percentage"
+                      ? `${discountData.value}%`
+                      : `${discountData.value.toLocaleString()} T`}
+                    )
+                  </p>
+                )}
+              </div>
+
+              {/* Payment Methods */}
+              <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-4">
+                  {isRTL ? "روش پرداخت" : "Payment Method"}
+                </h2>
+                {gateways.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-6">
+                    {isRTL
+                      ? "درگاه پرداختی فعال نیست"
+                      : "No payment gateways available"}
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {gateways.map((gw) => (
+                      <label
+                        key={gw._id}
+                        className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                          paymentMethod === gw.type
+                            ? "border-indigo-600 bg-indigo-50 dark:bg-indigo-900/20"
+                            : "border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="payment"
+                          value={gw.type}
+                          checked={paymentMethod === gw.type}
+                          onChange={(e) => setPaymentMethod(e.target.value)}
+                          className="w-5 h-5 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <div>
+                          <p className="font-medium text-sm text-gray-900 dark:text-gray-50">
+                            {isRTL && gw.nameFa ? gw.nameFa : gw.name}
+                          </p>
+                          {(isRTL && gw.descriptionFa
+                            ? gw.descriptionFa
+                            : gw.description) && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              {isRTL ? gw.descriptionFa : gw.description}
+                            </p>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <Button onClick={() => setStep(1)} variant="outline">
+                  {isRTL ? "بازگشت" : "Back"}
+                </Button>
+                <Button
+                  onClick={() => setStep(3)}
+                  variant="primary"
+                  disabled={!paymentMethod}
+                  className="flex-1"
+                >
+                  {isRTL ? "ادامه" : "Continue"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Confirm & Pay */}
+          {step === 3 && (
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-4">
+                {isRTL ? "تایید نهایی" : "Confirm Order"}
+              </h2>
+
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">
+                    {isRTL ? "نام:" : "Name:"}
+                  </span>
+                  <span className="font-medium text-gray-900 dark:text-gray-50">
+                    {form.fullName}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">
+                    {isRTL ? "تلفن:" : "Phone:"}
+                  </span>
+                  <span className="font-medium text-gray-900 dark:text-gray-50">
+                    {form.phone}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">
+                    {isRTL ? "آدرس:" : "Address:"}
+                  </span>
+                  <span className="font-medium text-gray-900 dark:text-gray-50 text-right max-w-[200px]">
+                    {form.province}, {form.city}, {form.address}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">
+                    {isRTL ? "پرداخت:" : "Payment:"}
+                  </span>
+                  <span className="font-medium text-gray-900 dark:text-gray-50">
+                    {gateways.find((g) => g.type === paymentMethod)?.name ||
+                      paymentMethod}
+                  </span>
+                </div>
+                {discountData && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">
+                      {isRTL ? "کد تخفیف:" : "Discount:"}
+                    </span>
+                    <span className="font-medium text-green-600 dark:text-green-400">
+                      {discountData.code} (-
+                      {discountData.discountAmount.toLocaleString()} T)
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between text-lg font-bold pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <span>{isRTL ? "مبلغ نهایی:" : "Final Amount:"}</span>
+                  <span className="text-indigo-600 dark:text-indigo-400">
+                    {total.toLocaleString()} T
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <Button onClick={() => setStep(2)} variant="outline">
+                  {isRTL ? "بازگشت" : "Back"}
+                </Button>
+                <Button
+                  onClick={handleSubmit}
+                  variant="primary"
+                  size="lg"
+                  disabled={isSubmitting}
+                  className="flex-1"
+                >
+                  {isSubmitting
+                    ? isRTL
+                      ? "در حال ثبت سفارش..."
+                      : "Placing Order..."
+                    : `${isRTL ? "پرداخت" : "Pay"} ${total.toLocaleString()} T`}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Order summary */}
+        {/* Order Summary Sidebar */}
         <div className="lg:col-span-2">
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 sticky top-24">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 sticky top-24">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50 mb-4">
               {isRTL ? "خلاصه سفارش" : "Order Summary"}
             </h2>
 
-            <div className="space-y-3 max-h-80 overflow-y-auto">
-              {items.map((item) => (
-                <div
-                  key={item.productId}
-                  className="flex justify-between items-center text-sm"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-900 dark:text-gray-50 truncate">
-                      {isRTL && item.nameFa ? item.nameFa : item.name}
-                    </p>
-                    <p className="text-gray-500 dark:text-gray-400">
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {items.map((item, i) => (
+                <div key={i} className="flex justify-between text-sm">
+                  <span className="truncate flex-1 text-gray-900 dark:text-gray-50">
+                    {isRTL && item.nameFa ? item.nameFa : item.name}
+                    <span className="text-gray-400 ml-1">
                       × {item.quantity}
-                    </p>
-                  </div>
-                  <span className="text-gray-900 dark:text-gray-50 font-medium">
+                    </span>
+                    {item.color && (
+                      <span className="text-xs text-gray-500 block">
+                        {item.color}
+                        {item.compatibleCar ? ` / ${item.compatibleCar}` : ""}
+                      </span>
+                    )}
+                  </span>
+                  <span className="font-medium text-gray-700 dark:text-gray-300 ml-2">
                     {(item.price * item.quantity).toLocaleString()} T
                   </span>
                 </div>
               ))}
             </div>
 
-            <div className="border-t border-gray-200 dark:border-gray-800 mt-4 pt-4 space-y-2">
-              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-300">
+            <div className="border-t border-gray-200 dark:border-gray-700 mt-4 pt-4 space-y-2 text-sm">
+              <div className="flex justify-between text-gray-500 dark:text-gray-400">
                 <span>{isRTL ? "جمع سبد خرید" : "Subtotal"}</span>
-                <span>{totalPrice.toLocaleString()} T</span>
+                <span>{subtotal.toLocaleString()} T</span>
               </div>
-              <div className="flex justify-between text-sm text-gray-600 dark:text-gray-300">
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-green-600 dark:text-green-400">
+                  <span>{isRTL ? "تخفیف" : "Discount"}</span>
+                  <span>-{discountAmount.toLocaleString()} T</span>
+                </div>
+              )}
+              <div className="flex justify-between text-gray-500 dark:text-gray-400">
                 <span>{isRTL ? "حمل و نقل" : "Shipping"}</span>
                 <span>{isRTL ? "رایگان" : "Free"}</span>
               </div>
-              <div className="border-t border-gray-200 dark:border-gray-800 pt-2 flex justify-between font-bold text-lg text-gray-900 dark:text-gray-50">
+              <div className="flex justify-between font-bold text-lg text-gray-900 dark:text-gray-50 pt-2 border-t border-gray-200 dark:border-gray-700">
                 <span>{isRTL ? "مجموع" : "Total"}</span>
-                <span>{totalPrice.toLocaleString()} T</span>
+                <span>{total.toLocaleString()} T</span>
               </div>
             </div>
           </div>
