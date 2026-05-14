@@ -32,7 +32,20 @@ const productSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
-
+    sku: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      uppercase: true,
+      validate: {
+        validator: function (v) {
+          // Allow letters, numbers, hyphens, dots — no spaces
+          return !v || /^[A-Z0-9\-\.]+$/.test(v);
+        },
+        message: "SKU can only contain letters, numbers, hyphens, and dots",
+      },
+    },
     description: {
       type: String,
       required: [true, "Product description is required"],

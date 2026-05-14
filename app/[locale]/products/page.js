@@ -1,92 +1,144 @@
-/**
- * Products Page (Server Component)
- *
- * Fetches products from the API on the server and displays them in a grid.
- * Supports filtering by category via query parameters.
- */
-
-import ProductCard from "@/components/ProductCard";
+import dbConnect from "@/lib/mongodb";
+import Product from "@/models/Product";
+import Category from "@/models/Category";
+import Item from "@/models/Item";
 import { getTranslations } from "next-intl/server";
+import ProductsClient from "./ProductsClient";
 
-export default async function ProductsPage({ searchParams, params }) {
+export default async function ProductsPage({ params, searchParams }) {
   const { locale } = await params;
-
-  // Get translations for this page
   const t = await getTranslations("products");
+  const sp = await searchParams;
 
-  // Read category filter from URL query parameter
-  // Example: /en/products?category=seat-covers
-  const { searchParams: searchParamsData } = { searchParams };
-  const category = (await searchParams)?.category || "";
+  // Parse query params
+  const search = sp.search || "";
+  const category = sp.category || "";
+  const minPrice = sp.minPrice || "";
+  const maxPrice = sp.maxPrice || "";
+  const color = sp.color || "";
+  const car = sp.car || "";
+  const sort = sp.sort || "newest";
+  const page = parseInt(sp.page) || 1;
+  const limit = 12;
 
-  // Build the API URL with optional category filter
-  let apiUrl = `${process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"}/api/products`;
+  await dbConnect();
+
+  // Build filter
+  const filter = { isActive: true };
+
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { nameFa: { $regex: search, $options: "i" } },
+      { description: { $regex: search, $options: "i" } },
+      { descriptionFa: { $regex: search, $options: "i" } },
+      { sku: { $regex: search, $options: "i" } },
+    ];
+  }
+
   if (category) {
-    apiUrl += `?category=${category}`;
+    const cat = await Category.findOne({ slug: category });
+    if (cat) filter.category = cat._id;
   }
 
-  // Fetch products from our API
-  let products = [];
-  let error = null;
+  if (minPrice || maxPrice) {
+    filter.price = {};
+    if (minPrice) filter.price.$gte = Number(minPrice);
+    if (maxPrice) filter.price.$lte = Number(maxPrice);
+  }
 
-  try {
-    const res = await fetch(apiUrl, {
-      // Next.js fetch cache configuration
-      // Revalidate every 60 seconds — good for semi-dynamic data
-      next: { revalidate: 60 },
+  // Color and car filters — filter products that have these in their arrays
+  if (color) {
+    filter.colors = color;
+  }
+
+  if (car) {
+    filter.compatibleCars = car;
+  }
+
+  // Sort
+  let sortOption = {};
+  switch (sort) {
+    case "price-asc":
+      sortOption = { price: 1 };
+      break;
+    case "price-desc":
+      sortOption = { price: -1 };
+      break;
+    case "rating":
+      sortOption = { "rating.average": -1 };
+      break;
+    default:
+      sortOption = { createdAt: -1 };
+      break;
+  }
+
+  const total = await Product.countDocuments(filter);
+
+  const products = await Product.find(filter)
+    .populate("category", "name nameFa slug image")
+    .sort(sortOption)
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean();
+
+  // Attach stock
+  const defaultWarehouseId = process.env.DEFAULT_WAREHOUSE_ID;
+  if (defaultWarehouseId) {
+    const productIds = products.map((p) => p._id);
+    const items = await Item.find({
+      product: { $in: productIds },
+      warehouse: defaultWarehouseId,
+    }).lean();
+
+    const stockMap = {};
+    productIds.forEach((pid) => {
+      stockMap[pid.toString()] = 0;
     });
-
-    if (!res.ok) {
-      throw new Error("Failed to fetch products");
-    }
-
-    const data = await res.json();
-    products = data.data || [];
-  } catch (err) {
-    error = err.message;
+    items.forEach((item) => {
+      stockMap[item.product.toString()] += Math.max(
+        0,
+        item.quantity - (item.reservedQuantity || 0),
+      );
+    });
+    products.forEach((p) => {
+      const s = stockMap[p._id.toString()] || 0;
+      p.stock = { totalAvailable: s, inStock: s > 0 };
+    });
   }
+
+  // Fetch categories for filter sidebar
+  const categories = await Category.find({ isActive: true })
+    .sort({ order: 1 })
+    .lean();
+
+  // Get unique colors and cars from products for filter options
+  const allColors = [
+    ...new Set(products.flatMap((p) => p.colors || [])),
+  ].sort();
+  const allCars = [
+    ...new Set(products.flatMap((p) => p.compatibleCars || [])),
+  ].sort();
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      {/* Page heading */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-50">
-          {t("title")}
-        </h1>
-        <p className="mt-2 text-gray-500 dark:text-gray-400">
-          {products.length} {locale === "fa" ? "محصول" : "products"}{" "}
-          {t("found")}
-        </p>
-      </div>
-
-      {/* Error state */}
-      {error && (
-        <div className="text-center py-12">
-          <p className="text-red-600 dark:text-red-400">
-            {locale === "fa"
-              ? "خطا در بارگذاری محصولات"
-              : "Error loading products"}
-          </p>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!error && products.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-gray-500 dark:text-gray-400 text-lg">
-            {locale === "fa" ? "محصولی یافت نشد" : "No products found"}
-          </p>
-        </div>
-      )}
-
-      {/* Product grid */}
-      {!error && products.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {products.map((product) => (
-            <ProductCard key={product._id} product={product} locale={locale} />
-          ))}
-        </div>
-      )}
-    </div>
+    <ProductsClient
+      products={JSON.parse(JSON.stringify(products))}
+      categories={JSON.parse(JSON.stringify(categories))}
+      allColors={allColors}
+      allCars={allCars}
+      total={total}
+      page={page}
+      limit={limit}
+      locale={locale}
+      currentFilters={{
+        search,
+        category,
+        minPrice,
+        maxPrice,
+        color,
+        car,
+        sort,
+      }}
+    />
   );
 }
